@@ -32,6 +32,13 @@ from .transformer_2d import Transformer2DModelOutput
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
+
+""" Shorten Words in this place:
+
+DiT - Diffusion Transformer
+
+"""
+
 class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin):
     """
     The Transformer model introduced in Stable Diffusion 3.
@@ -70,11 +77,18 @@ class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         out_channels: int = 16,
         pos_embed_max_size: int = 96,
     ):
+        """
+        Inner Dim is inner_dim = num_attention_heads^2 or 64^2 = 4096 = joint_attention_dim
+        """
         super().__init__()
         default_out_channels = in_channels
         self.out_channels = out_channels if out_channels is not None else default_out_channels
         self.inner_dim = self.config.num_attention_heads * self.config.attention_head_dim
 
+        """
+
+        Maybe this is: Positional Embedding, it is used to create x = Positional Embedding + (Noised Latent + Patching + Linear)
+        """
         self.pos_embed = PatchEmbed(
             height=self.config.sample_size,
             width=self.config.sample_size,
@@ -83,15 +97,50 @@ class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
             embed_dim=self.inner_dim,
             pos_embed_max_size=pos_embed_max_size,  # hard-code for now.
         )
+
+        """
+        Maybe: The time_text_embed is created from Pooled MLP + MLP (Timestep + Sinusoidal Encoding)
+        """
         self.time_text_embed = CombinedTimestepTextProjEmbeddings(
             embedding_dim=self.inner_dim, pooled_projection_dim=self.config.pooled_projection_dim
         )
+
+        """
+        This is Linear Layer in SD3.0 created from CLIP and T5-XXL, but it is pretrained model, but context here
+        is different. In architecture of SD3.0, it use CLIP-G/14, CLIP-L/14, And T5 XXL are pretrained model, 
+        in this code it is not constrained, HOWEVER This code is constraned to only limited of model configurations.
+
+        Linear Layer is used to hold Context Embeder from Encoder/Tokenizer models (pretrained or not)
+        """
+        
         self.context_embedder = nn.Linear(self.config.joint_attention_dim, self.config.caption_projection_dim)
 
+
+        """
+        This is transformer MM-DiT, with MM is short of MultiModal, is created by one list of MM-DiT blocks, 
+        number of blocks are ruled by "num_layers: int = 18", however this value is based on trainer from SD3.0 Diffuser,
+        it is not clear about SAI is using number of blocks maybe is very large.
+        In paper, number of  MM-DiT transformer blocks (or attention blocks) are equal to d:
+            d - Depth of Model,
+            d - number of attention blocks (or  num_layers: int = 18),
+            d - number of attention heads (or num_attention_heads: int = 18),
+            64*d - hidden size is set ??? (maybe from: attention_head_dim: int = 64),
+            4*64*d channels expanded in the MLP blocks???
+
+            Because i have d blocks so, each block have 64 dims = > d x 64,
+            not sure about MLP Blocks, but each block have 2 MLPs inside, so not sure 4*64*d is refering to what things
+            Not sure : joint_attention_dim: int = 4096 is related, because it is related to 4096 channels of context encoder.
+
+            In Paper, d is seen in value is d=24, not sure what it means
+        """
         # `attention_head_dim` is doubled to account for the mixing.
         # It needs to crafted when we get the actual checkpoints.
         self.transformer_blocks = nn.ModuleList(
             [
+                """
+
+                This is MM-DiT block, with MM is short of MultiModal
+                """
                 JointTransformerBlock(
                     dim=self.inner_dim,
                     num_attention_heads=self.config.num_attention_heads,
