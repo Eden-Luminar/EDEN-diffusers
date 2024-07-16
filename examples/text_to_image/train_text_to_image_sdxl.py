@@ -689,8 +689,10 @@ def main(args):
         revision=args.revision,
         variant=args.variant,
     )
+
+    # modify
     unet = UNet2DConditionModel.from_pretrained(
-        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision, variant=args.variant
+        args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision, variant=args.variant, device_map='auto'
     )
 
     # Freeze vae and text encoders.
